@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # --- Layanan Redis (untuk Fase 3) ---
+  redis:
+    image: redis:latest
+    container_name: redis
+    networks:
+      - distributed-net
+    ports:
+      - "6379:6379" # Ekspos ke host untuk debugging
+
+  # --- Fase 2: Lock Manager Nodes (Raft) ---
+  lock-node-1:
+    build: . # Build dari Dockerfile di direktori ini
+    container_name: lock-node-1
+    networks:
+      - distributed-net
+    command: python -m src.nodes.lock_manager # Override CMD
+    environment:
+      - NODE_ID=lock-node-1
+      - PORT=8000
+      - PEERS=lock-node-1,lock-node-2,lock-node-3
+    ports:
+      - "8001:8000" # Mapping port host 8001 ke kontainer 8000
+
+  lock-node-2:
+    build: .
+    container_name: lock-node-2
+    networks:
+      - distributed-net
+    command: python -m src.nodes.lock_manager
+    environment:
+      - NODE_ID=lock-node-2
+      - PORT=8000
+      - PEERS=lock-node-1,lock-node-2,lock-node-3
+    ports:
+      - "8002:8000"
+
+  lock-node-3:
+    build: .
+    container_name: lock-node-3
+    networks:
+      - distributed-net
+    command: python -m src.nodes.lock_manager
+    environment:
+      - NODE_ID=lock-node-3
+      - PORT=8000
+      - PEERS=lock-node-1,lock-node-2,lock-node-3
+    ports:
+      - "8003:8000"
+
+  # --- Fase 3: Queue Nodes (Consistent Hashing) ---
+  queue-node-1:
+    build: .
+    container_name: queue-node-1
+    networks:
+      - distributed-net
+    command: python -m src.nodes.queue_node
+    environment:
+      - NODE_ID=queue-node-1
+      - PORT=9000
+      - PEERS=queue-node-1,queue-node-2,queue-node-3
+      - REDIS_HOST=redis
+    ports:
+      - "9001:9000"
+    depends_on:
+      - redis
+
+  queue-node-2:
+    build: .
+    container_name: queue-node-2
+    networks:
+      - distributed-net
+    command: python -m src.nodes.queue_node
+    environment:
+      - NODE_ID=queue-node-2
+      - PORT=9000
+      - PEERS=queue-node-1,queue-node-2,queue-node-3
+      - REDIS_HOST=redis
+    ports:
+      - "9002:9000"
+    depends_on:
+      - redis
+
+  queue-node-3:
+    build: .
+    container_name: queue-node-3
+    networks:
+      - distributed-net
+    command: python -m src.nodes.queue_node
+    environment:
+      - NODE_ID=queue-node-3
+      - PORT=9000
+      - PEERS=queue-node-1,queue-node-2,queue-node-3
+      - REDIS_HOST=redis
+    ports:
+      - "9003:9000"
+    depends_on:
+      - redis
+
+  # --- Fase 4: Cache Nodes (MESI) ---
+  cache-node-1:
+    build: .
+    container_name: cache-node-1
+    networks:
+      - distributed-net
+    command: python -m src.nodes.cache_node
+    environment:
+      - NODE_ID=cache-node-1
+      - PORT=7000
+      - PEERS=cache-node-1,cache-node-2
+    ports:
+      - "7001:7000"
+
+  cache-node-2:
+    build: .
+    container_name: cache-node-2
+    networks:
+      - distributed-net
+    command: python -m src.nodes.cache_node
+    environment:
+      - NODE_ID=cache-node-2
+      - PORT=7000
+      - PEERS=cache-node-1,cache-node-2
+    ports:
+      - "7002:7000"
+
+# Definisikan jaringan kustom agar semua bisa saling bicara
+networks:
+  distributed-net:
+    driver: bridge

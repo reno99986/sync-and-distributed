@@ -1,0 +1,9 @@
+# Testing
+pytest
+locust
+
+# Network
+aiohttp
+
+# cache
+redis
