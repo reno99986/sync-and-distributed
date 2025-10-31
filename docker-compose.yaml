@@ -109,7 +109,7 @@ services:
     environment:
       - NODE_ID=cache-node-1
       - PORT=7000
-      - PEERS=cache-node-1,cache-node-2
+      - PEERS=cache-node-1,cache-node-2,cache-node-3
     ports:
       - "7001:7000"
 
@@ -122,9 +122,22 @@ services:
     environment:
       - NODE_ID=cache-node-2
       - PORT=7000
-      - PEERS=cache-node-1,cache-node-2
+      - PEERS=cache-node-1,cache-node-2,cache-node-3
     ports:
       - "7002:7000"
+
+  cache-node-3:
+    build: .
+    container_name: cache-node-3
+    networks:
+      - distributed-net
+    command: python -m src.nodes.cache_node
+    environment:
+      - NODE_ID=cache-node-3
+      - PORT=7000
+      - PEERS=cache-node-1,cache-node-2,cache-node-3
+    ports:
+      - "7003:7000"
 
 # Definisikan jaringan kustom agar semua bisa saling bicara
 networks:

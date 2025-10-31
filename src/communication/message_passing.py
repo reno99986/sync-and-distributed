@@ -1,4 +1,14 @@
 # src/communication/message_passing.py
+
+import aiohttp
+import asyncio
+import logging
+
+# Mengatur logging dasar untuk melihat output
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+# src/communication/message_passing.py
 # (Pastikan di-update)
 
 import aiohttp

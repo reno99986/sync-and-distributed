@@ -1,0 +1,411 @@
+openapi: 3.0.0
+info:
+  title: "API Sistem Sinkronisasi Terdistribusi"
+  description: "Spesifikasi API untuk simulasi Distributed Lock Manager, Queue, dan Cache."
+  version: "1.0.0"
+servers:
+  - url: "http://node-1.example.com/api/v1"
+    description: "Contoh server node 1"
+  - url: "http://node-2.example.com/api/v1"
+    description: "Contoh server node 2"
+
+tags:
+  - name: "1. Manajer Kunci (Lock Manager)"
+    description: "Endpoint untuk mengelola distributed locks (Req A)"
+  - name: "2. Sistem Antrean (Queue System)"
+    description: "Endpoint untuk distributed queue (Req B)"
+  - name: "3. Koherensi Cache (Cache Coherence)"
+    description: "Endpoint untuk cache coherence (Req C)"
+  - name: "4. Manajemen Cluster"
+    description: "Endpoint untuk memantau kesehatan node dan cluster"
+
+paths:
+  # ======================================================
+  # 1. Manajer Kunci (Lock Manager) - Requirement A
+  # ======================================================
+  /locks/acquire:
+    post:
+      tags:
+        - "1. Manajer Kunci (Lock Manager)"
+      summary: "Mencoba memperoleh kunci (lock)"
+      description: "Meminta kunci untuk sebuah resource. Ini adalah operasi yang bisa memblokir."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resource_id:
+                  type: string
+                  example: "dokumen-penting-123"
+                lock_type:
+                  type: string
+                  enum: [shared, exclusive]
+                  example: "exclusive"
+                client_id:
+                  type: string
+                  example: "worker-A"
+                timeout_ms:
+                  type: integer
+                  description: "Waktu tunggu maksimum (ms) sebelum gagal."
+                  example: 5000
+      responses:
+        "200":
+          description: "Kunci berhasil diperoleh"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "acquired"
+                  lock_id:
+                    type: string
+                    example: "uuid-lock-12345"
+        "409":
+          description: "Gagal memperoleh kunci (sudah dipegang / konflik)"
+        "408":
+          description: "Gagal memperoleh kunci karena timeout"
+
+  /locks/release:
+    post:
+      tags:
+        - "1. Manajer Kunci (Lock Manager)"
+      summary: "Melepaskan kunci (lock)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resource_id:
+                  type: string
+                  example: "dokumen-penting-123"
+                client_id:
+                  type: string
+                  description: "Hanya client yang memegang yang bisa melepaskan."
+                  example: "worker-A"
+      responses:
+        "200":
+          description: "Kunci berhasil dilepaskan"
+        "403":
+          description: "Gagal melepaskan (client_id tidak cocok)"
+
+  /locks/{resource_id}:
+    get:
+      tags:
+        - "1. Manajer Kunci (Lock Manager)"
+      summary: "Memeriksa status kunci"
+      parameters:
+        - in: path
+          name: resource_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Status kunci saat ini"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resource_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [free, held]
+                  lock_type:
+                    type: string
+                    enum: [shared, exclusive, null]
+                  holders:
+                    type: array
+                    items:
+                      type: string
+                    example: ["worker-A", "worker-B"]
+        "404":
+          description: "Resource tidak dikenal"
+
+  /locks/deadlocks:
+    get:
+      tags:
+        - "1. Manajer Kunci (Lock Manager)"
+      summary: "Mendeteksi deadlock (Req A.5)"
+      description: "Menjalankan atau melaporkan hasil deteksi deadlock."
+      responses:
+        "200":
+          description: "Laporan status deadlock"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deadlock_detected:
+                    type: boolean
+                  deadlocked_chains:
+                    type: array
+                    items:
+                      type: string
+                    example: ["worker-A -> worker-B -> worker-A"]
+
+  # ======================================================
+  # 2. Sistem Antrean (Queue System) - Requirement B
+  # ======================================================
+  /queues/{queue_name}/messages:
+    post:
+      tags:
+        - "2. Sistem Antrean (Queue System)"
+      summary: "Mengirim (produce) pesan ke antrean"
+      parameters:
+        - in: path
+          name: queue_name
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: object
+                  example: { "user_id": 123, "task": "kirim-email" }
+      responses:
+        "201":
+          description: "Pesan berhasil ditambahkan"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                    example: "uuid-msg-abcde"
+                  status:
+                    type: string
+                    example: "enqueued"
+
+    get:
+      tags:
+        - "2. Sistem Antrean (Queue System)"
+      summary: "Mengambil (consume) pesan dari antrean"
+      description: "Mengambil 1 pesan. Pesan akan menjadi 'in-flight' (tidak terlihat) selama visibility_timeout."
+      parameters:
+        - in: path
+          name: queue_name
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: consumer_id
+          required: true
+          schema:
+            type: string
+            example: "consumer-1"
+        - in: query
+          name: visibility_timeout_sec
+          schema:
+            type: integer
+            default: 30
+      responses:
+        "200":
+          description: "Pesan berhasil diambil"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                  receipt_handle:
+                    type: string
+                    description: "Token untuk ACK/NACK pesan ini"
+                    example: "receipt-xyz-789"
+                  payload:
+                    type: object
+        "204":
+          description: "Tidak ada pesan di antrean"
+
+  /queues/{queue_name}/ack:
+    post:
+      tags:
+        - "2. Sistem Antrean (Queue System)"
+      summary: "Konfirmasi (ACK) pesan telah diproses"
+      description: "Menghapus pesan dari antrean setelah berhasil diproses (At-least-once delivery)."
+      parameters:
+        - in: path
+          name: queue_name
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                receipt_handle:
+                  type: string
+                  example: "receipt-xyz-789"
+      responses:
+        "200":
+          description: "Pesan berhasil di-ACK dan dihapus"
+        "404":
+          description: "Pesan tidak ditemukan (mungkin sudah di-ACK atau timeout)"
+
+  # ======================================================
+  # 3. Koherensi Cache (Cache Coherence) - Requirement C
+  # ======================================================
+  /cache/{key}:
+    get:
+      tags:
+        - "3. Koherensi Cache (Cache Coherence)"
+      summary: "Mengambil data dari cache"
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Data ditemukan"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  value:
+                    type: object
+                  state:
+                    type: string
+                    description: "Debug: Status MESI/MOSI/MOESI di node ini"
+                    example: "Shared"
+        "404":
+          description: "Cache miss (key tidak ditemukan)"
+
+    put:
+      tags:
+        - "3. Koherensi Cache (Cache Coherence)"
+      summary: "Menyimpan/Memperbarui data di cache"
+      description: "Operasi ini akan memicu protokol koherensi (invalidation/update)."
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: object
+                  example: { "data": "ini data baru" }
+                ttl_sec:
+                  type: integer
+                  example: 3600
+      responses:
+        "200":
+          description: "Data berhasil disimpan/diperbarui"
+
+    delete:
+      tags:
+        - "3. Koherensi Cache (Cache Coherence)"
+      summary: "Menghapus data dari cache"
+      description: "Operasi ini akan memicu protokol koherensi (invalidation)."
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Data berhasil dihapus"
+
+  /cache/stats:
+    get:
+      tags:
+        - "3. Koherensi Cache (Cache Coherence)"
+      summary: "Melihat metrik performa cache (Req C.5)"
+      responses:
+        "200":
+          description: "Statistik performa cache"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hit_rate:
+                    type: number
+                    example: 0.85
+                  miss_rate:
+                    type: number
+                    example: 0.15
+                  total_keys:
+                    type: integer
+                  evictions_lru:
+                    type: integer
+                    description: "Jumlah eviksi karena LRU/LFU"
+                  invalidations_sent:
+                    type: integer
+                  updates_propagated:
+                    type: integer
+
+  # ======================================================
+  # 4. Manajemen Cluster
+  # ======================================================
+  /cluster/nodes:
+    get:
+      tags:
+        - "4. Manajemen Cluster"
+      summary: "Melihat semua node dalam cluster"
+      responses:
+        "200":
+          description: "Daftar node dan statusnya"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    node_id:
+                      type: string
+                    address:
+                      type: string
+                    status:
+                      type: string
+                      enum: [healthy, unhealthy, partitioned]
+
+  /cluster/status/raft:
+    get:
+      tags:
+        - "4. Manajemen Cluster"
+      summary: "Melihat status Raft Consensus (untuk Lock Manager)"
+      responses:
+        "200":
+          description: "Status internal Raft"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  leader_id:
+                    type: string
+                  current_term:
+                    type: integer
+                  last_applied_index:
+                    type: integer

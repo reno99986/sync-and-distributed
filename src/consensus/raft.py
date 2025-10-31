@@ -35,7 +35,9 @@ class RaftConsensus:
         Waktu timeout harus acak untuk mencegah
         semua node menjadi candidate di waktu yang bersamaan.
         """
-        return random.uniform(0.150, 0.300) # 150-300 ms
+        # Perbesar timeout dan tambah variasi lebih besar
+        base_timeout = 1.0 + (hash(self.node.node_id) % 3) * 0.5  # 1.0-2.5s base
+        return base_timeout + random.uniform(0.5, 1.5)  # Total: 1.5-4.0s
 
     async def start_election_timer(self):
         """
@@ -123,15 +125,22 @@ class RaftConsensus:
             # Kirim ke semua peer, tapi jangan tunggu balasan (kirim & lupakan)
             asyncio.create_task(self.node.broadcast_rpc("/append-entries", payload))
             
-            # Kirim heartbeat setiap 50ms
-            await asyncio.sleep(0.050)
+            # Kirim heartbeat setiap 500ms (lebih realistis untuk network)
+            await asyncio.sleep(0.5)
             
-    def step_down(self, new_term):
+    def step_down(self, new_term=None):
         """
         Turun tahta (misal: kita menemukan Leader/Candidate
-        dengan term yang lebih tinggi).
+        dengan term yang lebih tinggi, atau election gagal).
         """
-        log.warning(f"[{self.node.node_id}] Turun tahta. Term baru: {new_term}")
+        if new_term is None:
+            new_term = self.current_term
+            
+        if new_term > self.current_term:
+            log.warning(f"[{self.node.node_id}] Turun tahta karena term lebih tinggi: {new_term}")
+        else:
+            log.warning(f"[{self.node.node_id}] Turun tahta ke follower (Term {self.current_term})")
+            
         self.state = 'follower'
         self.current_term = new_term
         self.voted_for = None
@@ -140,6 +149,7 @@ class RaftConsensus:
         # Jika kita tadinya Leader, hentikan pengiriman heartbeat
         if self.heartbeat_timer_task:
             self.heartbeat_timer_task.cancel()
+            self.heartbeat_timer_task = None
             
         # Mulai lagi timer election
         self.reset_election_timer()
